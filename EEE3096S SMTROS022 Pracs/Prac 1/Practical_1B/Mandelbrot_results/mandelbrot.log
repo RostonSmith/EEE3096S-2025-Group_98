@@ -1,0 +1,12 @@
+2025-08-21 20:57 - INFO - Mandelbrot Performance Benchmarking
+2025-08-21 20:57 - INFO - 
+Resolution | Time    | Checksum | Image File            
+-----------+---------+----------+-----------------------
+128x128    | 0.087 s | 429384   | mandelbrot_128×128.png
+160x160    | 0.142 s | 669829   | mandelbrot_160×160.png
+192x192    | 0.198 s | 966024   | mandelbrot_192×192.png
+224x224    | 0.283 s | 1314999  | mandelbrot_224×224.png
+256x256    | 0.359 s | 1715812  | mandelbrot_256×256.png
+2025-08-21 20:57 - INFO - Mandelbrot benchmarking completed
+2025-08-21 20:57 - INFO - Note: NumExpr detected 12 cores but "NUMEXPR_MAX_THREADS" not set, so enforcing safe limit of 8.
+2025-08-21 20:57 - INFO - NumExpr defaulting to 8 threads.

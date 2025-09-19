@@ -33,6 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define MAX_ITER 100
 #define SCALE 1000000  // fixed-point scale factor (1e6)
 /* USER CODE END PD */
 

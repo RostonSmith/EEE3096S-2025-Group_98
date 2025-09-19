@@ -115,7 +115,7 @@ int main(void)
     // Visual indicator: Turn on LED0 to signal processing start
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
-    // Loop through all max_iter and square sizes
+    // Loop through all square sizes
     for (int i = 0; i < 5; i++) {         // sizes (width = height)
       int width  = test_sizes[i];
       int height = test_sizes[i];
@@ -138,10 +138,13 @@ int main(void)
 
       // Keep LED0 ON for 2s after completing all tests
       HAL_Delay(2000);
+
+      // Turn OFF LED1
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
     }
     // Turn OFF all LEDs
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
-
+    
   }
    /* USER CODE END 3 */
 }

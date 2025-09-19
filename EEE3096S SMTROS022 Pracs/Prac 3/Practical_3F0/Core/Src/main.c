@@ -21,7 +21,9 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include <stdint.h>
+#include <stdbool.h>
+#include "stm32f0xx.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -31,7 +33,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define MAX_ITER 100
+#define SCALE 1000000  // fixed-point scale factor (1e6)
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -40,10 +43,15 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-
 /* USER CODE BEGIN PV */
-//TODO: Define variables you think you might need
-// - Performance timing variables (e.g execution time, throughput, pixels per second, clock cycles)
+volatile uint32_t start_time = 0;
+volatile uint32_t end_time = 0;
+volatile uint32_t execution_time = 0;
+volatile uint64_t checksum = 0;
+
+const int test_widths[5]  = {128, 160, 192, 224, 256};
+const int test_heights[5] = {128, 160, 192, 224, 256};
+const int test_idx = 4;
 
 /* USER CODE END PV */
 
@@ -51,7 +59,9 @@
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
-//TODO: Define any function prototypes you might need such as the calculate Mandelbrot function among others
+uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations);
+uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations);
+
 
 /* USER CODE END PFP */
 
@@ -100,23 +110,35 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  //TODO: Visual indicator: Turn on LED0 to signal processing start
+    // Visual indicator: Turn on LED0 to signal processing start
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
+    // Benchmark and Profile Performance
+    // Example: test resolution 128x128 (you can change this in debug/live expr)
+    int width = test_widths[test_idx];
+    int height = test_heights[test_idx];
 
-	  //TODO: Benchmark and Profile Performance
+    start_time = HAL_GetTick();
 
+    // Choose which Mandelbrot to run
+    checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, MAX_ITER);
+    // checksum = calculate_mandelbrot_double(width, height, MAX_ITER);
 
-	  //TODO: Visual indicator: Turn on LED1 to signal processing start
+    // Visual indicator: Turn on LED1 to signal processing start
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
 
+    end_time = HAL_GetTick();
+    execution_time = end_time - start_time;
 
-	  //TODO: Keep the LEDs ON for 2s
+    // Keep the LEDs ON for 2s
+    HAL_Delay(2000);
 
-	  // TODO: Turn OFF LEDs
-
+    // Turn OFF LEDs
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
 
 
   }
-  /* USER CODE END 3 */
+   /* USER CODE END 3 */
 }
 
 /**
@@ -165,9 +187,9 @@ void SystemClock_Config(void)
 static void MX_GPIO_Init(void)
 {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
-  /* USER CODE BEGIN MX_GPIO_Init_1 */
+/* USER CODE BEGIN MX_GPIO_Init_1 */
 
-  /* USER CODE END MX_GPIO_Init_1 */
+/* USER CODE END MX_GPIO_Init_1 */
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOF_CLK_ENABLE();
@@ -187,13 +209,68 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /* USER CODE BEGIN MX_GPIO_Init_2 */
+/* USER CODE BEGIN MX_GPIO_Init_2 */
 
-  /* USER CODE END MX_GPIO_Init_2 */
+/* USER CODE END MX_GPIO_Init_2 */
 }
 
 /* USER CODE BEGIN 4 */
-//TODO: Function signatures you defined previously , implement them here
+// Mandelbrot using fixed-point integers
+uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations){
+    uint64_t mandelbrot_sum = 0;
+
+    for (int y = 0; y < height; y++) {
+        // y0 = (y/height)*2.0 - 1.0  (scaled)
+        int64_t y0 = ((int64_t)y * 2000000 / height) - 1000000;
+
+        for (int x = 0; x < width; x++) {
+            // x0 = (x/width)*3.5 - 2.5  (scaled)
+            int64_t x0 = ((int64_t)x * 3500000 / width) - 2500000;
+
+            int64_t xi = 0, yi = 0;
+            int iteration = 0;
+
+            while (iteration < max_iterations) {
+                // xi*xi + yi*yi <= 4
+                int64_t xi2 = (xi * xi) / SCALE;
+                int64_t yi2 = (yi * yi) / SCALE;
+                if (xi2 + yi2 > 4000000) break;
+
+                int64_t tmp = xi2 - yi2 + x0;
+                yi = (2 * xi * yi) / SCALE + y0;
+                xi = tmp;
+                iteration++;
+            }
+            mandelbrot_sum += iteration;
+        }
+    }
+    return mandelbrot_sum;
+
+}
+
+// Mandelbrot using doubles
+uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations){
+    uint64_t mandelbrot_sum = 0;
+
+    for (int y = 0; y < height; y++) {
+        double y0 = ((double)y / height) * 2.0 - 1.0;
+        for (int x = 0; x < width; x++) {
+            double x0 = ((double)x / width) * 3.5 - 2.5;
+
+            double xi = 0.0, yi = 0.0;
+            int iteration = 0;
+
+            while (iteration < max_iterations && (xi*xi + yi*yi) <= 4.0) {
+                double tmp = xi*xi - yi*yi + x0;
+                yi = 2*xi*yi + y0;
+                xi = tmp;
+                iteration++;
+            }
+            mandelbrot_sum += iteration;
+        }
+    }
+    return mandelbrot_sum;
+}
 
 /* USER CODE END 4 */
 

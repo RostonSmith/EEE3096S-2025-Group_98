@@ -33,7 +33,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_ITER 100
 #define SCALE 1000000  // fixed-point scale factor (1e6)
 /* USER CODE END PD */
 
@@ -48,10 +47,11 @@ volatile uint32_t start_time = 0;
 volatile uint32_t end_time = 0;
 volatile uint32_t execution_time = 0;
 volatile uint64_t checksum = 0;
+volatile uint64_t checksum_results[5][5];       // [max_iter][test_sizes]
+volatile uint32_t execution_time_results[5][5]; // [max_iter][test_sizes]
 
-const int test_widths[5]  = {128, 160, 192, 224, 256};
-const int test_heights[5] = {128, 160, 192, 224, 256};
-const int test_idx = 4;
+const int test_sizes[5]  = {128, 160, 192, 224, 256};
+const int max_iter[5] = {100, 250, 500, 750, 1000};
 
 /* USER CODE END PV */
 
@@ -60,6 +60,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
 uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations);
+uint64_t calculate_mandelbrot_float(int width, int height, int max_iterations);
 uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations);
 
 
@@ -113,29 +114,48 @@ int main(void)
     // Visual indicator: Turn on LED0 to signal processing start
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
-    // Benchmark and Profile Performance
-    // Example: test resolution 128x128 (you can change this in debug/live expr)
-    int width = test_widths[test_idx];
-    int height = test_heights[test_idx];
+    // Loop through all max_iter and square sizes
+    for (int i = 0; i < 5; i++) {           // max_iter
+      for (int j = 0; j < 5; j++) {         // sizes (width = height)
+        int width  = test_sizes[j];
+        int height = test_sizes[j];
+        int max_it = max_iter[i];
 
-    start_time = HAL_GetTick();
+        start_time = HAL_GetTick();
 
-    // Choose which Mandelbrot to run
-    checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, MAX_ITER);
-    // checksum = calculate_mandelbrot_double(width, height, MAX_ITER);
+        // Run Mandelbrot (can keep all three if you want)
+        checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, max_it);
+//        checksum = calculate_mandelbrot_float(width, height, max_it);
+//        checksum = calculate_mandelbrot_double(width, height, max_it);
 
-    // Visual indicator: Turn on LED1 to signal processing start
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+        end_time = HAL_GetTick();
+        execution_time = end_time - start_time;
 
-    end_time = HAL_GetTick();
-    execution_time = end_time - start_time;
+        // Store results
+        checksum_results[i][j]       = checksum;
+        execution_time_results[i][j] = execution_time;
 
-    // Keep the LEDs ON for 2s
+        // Visual indicator: Turn on LED1 to signal processing active
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+
+        HAL_Delay(100); // short pause for visual feedback
+
+        // Turn OFF LED1 between tests
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+      }
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);
+
+      HAL_Delay(100);
+
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
+    }
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+
+    // Keep LED0 ON for 2s after completing all tests
     HAL_Delay(2000);
 
-    // Turn OFF LEDs
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
-
+    // Turn OFF all LEDs
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_3, GPIO_PIN_RESET);
 
   }
    /* USER CODE END 3 */
@@ -246,6 +266,32 @@ uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int 
     }
     return mandelbrot_sum;
 
+}
+
+// Mandelbrot using single-precision floats
+uint64_t calculate_mandelbrot_float(int width, int height, int max_iterations) {
+    uint64_t mandelbrot_sum = 0;
+
+    for (int y = 0; y < height; y++) {
+        float y0 = ((float)y / (float)height) * 2.0f - 1.0f;
+
+        for (int x = 0; x < width; x++) {
+            float x0 = ((float)x / (float)width) * 3.5f - 2.5f;
+
+            float xi = 0.0f, yi = 0.0f;
+            int iteration = 0;
+
+            while (iteration < max_iterations && (xi*xi + yi*yi) <= 4.0f) {
+                float tmp = xi*xi - yi*yi + x0;
+                yi = 2.0f*xi*yi + y0;
+                xi = tmp;
+                iteration++;
+            }
+
+            mandelbrot_sum += iteration;
+        }
+    }
+    return mandelbrot_sum;
 }
 
 // Mandelbrot using doubles

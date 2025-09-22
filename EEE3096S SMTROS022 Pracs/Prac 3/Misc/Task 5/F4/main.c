@@ -124,9 +124,9 @@ int main(void)
       start_time = HAL_GetTick();
 
       // Run Mandelbrot (can keep all three if you want)
-//      checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, MAX_ITER);
-      checksum = calculate_mandelbrot_float(width, height, MAX_ITER);
-//      checksum = calculate_mandelbrot_double(width, height, MAX_ITER);
+      checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, MAX_ITER);
+      // checksum = calculate_mandelbrot_float(width, height, MAX_ITER);
+      // checksum = calculate_mandelbrot_double(width, height, MAX_ITER);
 
       end_time = HAL_GetTick();
       execution_time = end_time - start_time;
@@ -139,8 +139,6 @@ int main(void)
 
       // Keep LED0 ON for 2s after completing all tests
       HAL_Delay(2000);
-
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
     }
     // Turn OFF all LEDs
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);

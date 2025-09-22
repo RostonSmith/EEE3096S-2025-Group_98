@@ -33,7 +33,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define MAX_ITER 100
 #define SCALE 1000000  // fixed-point scale factor (1e6)
 /* USER CODE END PD */
 
@@ -48,11 +47,11 @@ volatile uint32_t start_time = 0;
 volatile uint32_t end_time = 0;
 volatile uint32_t execution_time = 0;
 volatile uint64_t checksum = 0;
-volatile uint64_t checksum_results[5];       // [test_sizes]
-volatile uint32_t execution_time_results[5]; // [test_sizes]
+volatile uint64_t checksum_results[5][5];       // [max_iter][test_sizes]
+volatile uint32_t execution_time_results[5][5]; // [max_iter][test_sizes]
 
 const int test_sizes[5]  = {128, 160, 192, 224, 256};
-
+const int max_iter[5] = {100, 250, 500, 750, 1000};
 
 /* USER CODE END PV */
 
@@ -115,36 +114,49 @@ int main(void)
     // Visual indicator: Turn on LED0 to signal processing start
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
-    // Loop through all square sizes
-    for (int i = 0; i < 5; i++) {         // sizes (width = height)
-      int width  = test_sizes[i];
-      int height = test_sizes[i];
+    // Loop through all max_iter and square sizes
+    for (int i = 0; i < 5; i++) {           // max_iter
+      for (int j = 0; j < 5; j++) {         // sizes (width = height)
+        int width  = test_sizes[j];
+        int height = test_sizes[j];
+        int max_it = max_iter[i];
 
-      start_time = HAL_GetTick();
+        start_time = HAL_GetTick();
 
-      // Run Mandelbrot (can keep all three if you want)
-      checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, MAX_ITER);
-      // checksum = calculate_mandelbrot_float(width, height, MAX_ITER);
-      // checksum = calculate_mandelbrot_double(width, height, MAX_ITER);
+        // Run Mandelbrot (can keep all three if you want)
+        checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, max_it);
+//        checksum = calculate_mandelbrot_float(width, height, max_it);
+//        checksum = calculate_mandelbrot_double(width, height, max_it);
 
-      end_time = HAL_GetTick();
-      execution_time = end_time - start_time;
+        end_time = HAL_GetTick();
+        execution_time = end_time - start_time;
 
-      checksum_results[i]       = checksum;
-      execution_time_results[i] = execution_time;
+        // Store results
+        checksum_results[i][j]       = checksum;
+        execution_time_results[i][j] = execution_time;
 
-      // Visual indicator: Turn on LED1 to signal processing active
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
+        // Visual indicator: Turn on LED1 to signal processing active
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_SET);
 
-      // Keep LED0 ON for 2s after completing all tests
-      HAL_Delay(2000);
+        HAL_Delay(100); // short pause for visual feedback
 
-      // Turn OFF LED1
-      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+        // Turn OFF LED1 between tests
+        HAL_GPIO_WritePin(GPIOB, GPIO_PIN_1, GPIO_PIN_RESET);
+      }
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_SET);
+
+      HAL_Delay(100);
+
+      HAL_GPIO_WritePin(GPIOB, GPIO_PIN_2, GPIO_PIN_RESET);
     }
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+
+    // Keep LED0 ON for 2s after completing all tests
+    HAL_Delay(2000);
+
     // Turn OFF all LEDs
-    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_1, GPIO_PIN_RESET);
-    
+    HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0|GPIO_PIN_3, GPIO_PIN_RESET);
+
   }
    /* USER CODE END 3 */
 }

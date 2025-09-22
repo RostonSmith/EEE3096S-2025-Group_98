@@ -1,4 +1,4 @@
-ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s 			page 1
+ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccWqYsjh.s 			page 1
 
 
    1              		.cpu cortex-m0
@@ -58,7 +58,7 @@ ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s 			page 1
   30:Core/Src/stm32f0xx_hal_msp.c **** /* USER CODE END TD */
   31:Core/Src/stm32f0xx_hal_msp.c **** 
   32:Core/Src/stm32f0xx_hal_msp.c **** /* Private define ------------------------------------------------------------*/
-ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s 			page 2
+ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccWqYsjh.s 			page 2
 
 
   33:Core/Src/stm32f0xx_hal_msp.c **** /* USER CODE BEGIN Define */
@@ -118,7 +118,7 @@ ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s 			page 1
   43 000a 9961     		str	r1, [r3, #24]
   44              		.loc 1 70 3 view .LVU4
   45 000c 9969     		ldr	r1, [r3, #24]
-ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s 			page 3
+ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccWqYsjh.s 			page 3
 
 
   46 000e 0A40     		ands	r2, r1
@@ -167,13 +167,13 @@ ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s 			page 1
   82              		.file 2 "C:\\ST\\STM32CubeIDE_1.19.0\\STM32CubeIDE\\plugins\\com.st.stm32cube.ide.mcu.externaltool
   83              		.file 3 "C:\\ST\\STM32CubeIDE_1.19.0\\STM32CubeIDE\\plugins\\com.st.stm32cube.ide.mcu.externaltool
   84              		.file 4 "Drivers/CMSIS/Device/ST/STM32F0xx/Include/stm32f051x8.h"
-ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s 			page 4
+ARM GAS  C:\Users\rosto\AppData\Local\Temp\ccWqYsjh.s 			page 4
 
 
 DEFINED SYMBOLS
                             *ABS*:00000000 stm32f0xx_hal_msp.c
-C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s:19     .text.HAL_MspInit:00000000 $t
-C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s:25     .text.HAL_MspInit:00000000 HAL_MspInit
-C:\Users\rosto\AppData\Local\Temp\ccm2Byjk.s:76     .text.HAL_MspInit:0000002c $d
+C:\Users\rosto\AppData\Local\Temp\ccWqYsjh.s:19     .text.HAL_MspInit:00000000 $t
+C:\Users\rosto\AppData\Local\Temp\ccWqYsjh.s:25     .text.HAL_MspInit:00000000 HAL_MspInit
+C:\Users\rosto\AppData\Local\Temp\ccWqYsjh.s:76     .text.HAL_MspInit:0000002c $d
 
 NO UNDEFINED SYMBOLS

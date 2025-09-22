@@ -33,7 +33,7 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define SCALE 1000000  // fixed-point scale factor (1e6)
+#define MAX_ITER 100  
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -47,11 +47,11 @@ volatile uint32_t start_time = 0;
 volatile uint32_t end_time = 0;
 volatile uint32_t execution_time = 0;
 volatile uint64_t checksum = 0;
-volatile uint64_t checksum_results[5][5];       // [max_iter][test_sizes]
-volatile uint32_t execution_time_results[5][5]; // [max_iter][test_sizes]
+volatile uint64_t checksum_results[3][5];       // [max_iter][test_sizes]
+volatile uint32_t execution_time_results[3][5]; // [max_iter][test_sizes]
 
 const int test_sizes[5]  = {128, 160, 192, 224, 256};
-const int max_iter[5] = {100, 250, 500, 750, 1000};
+const int scale[3] = {1000, 10000, 1000000};
 
 /* USER CODE END PV */
 
@@ -59,7 +59,7 @@ const int max_iter[5] = {100, 250, 500, 750, 1000};
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 /* USER CODE BEGIN PFP */
-uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations);
+uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations, int scale);
 uint64_t calculate_mandelbrot_float(int width, int height, int max_iterations);
 uint64_t calculate_mandelbrot_double(int width, int height, int max_iterations);
 
@@ -115,18 +115,18 @@ int main(void)
     HAL_GPIO_WritePin(GPIOB, GPIO_PIN_0, GPIO_PIN_SET);
 
     // Loop through all max_iter and square sizes
-    for (int i = 0; i < 5; i++) {           // max_iter
+    for (int i = 0; i < 3; i++) {           // scale
       for (int j = 0; j < 5; j++) {         // sizes (width = height)
         int width  = test_sizes[j];
         int height = test_sizes[j];
-        int max_it = max_iter[i];
+        int scale_cur = scale[i];
 
         start_time = HAL_GetTick();
 
         // Run Mandelbrot (can keep all three if you want)
-        checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, max_it);
-//        checksum = calculate_mandelbrot_float(width, height, max_it);
-//        checksum = calculate_mandelbrot_double(width, height, max_it);
+        checksum = calculate_mandelbrot_fixed_point_arithmetic(width, height, MAX_ITER, scale_cur);
+//        checksum = calculate_mandelbrot_float(width, height, MAX_ITER);
+//        checksum = calculate_mandelbrot_double(width, height, MAX_ITER);
 
         end_time = HAL_GetTick();
         execution_time = end_time - start_time;
@@ -236,28 +236,28 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 // Mandelbrot using fixed-point integers
-uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations){
+uint64_t calculate_mandelbrot_fixed_point_arithmetic(int width, int height, int max_iterations, int scale){
     uint64_t mandelbrot_sum = 0;
 
     for (int y = 0; y < height; y++) {
         // y0 = (y/height)*2.0 - 1.0  (scaled)
-        int64_t y0 = ((int64_t)y * 2000000 / height) - 1000000;
+        int64_t y0 = ((int64_t)y * 2.0 * scale / height) - 1.0 * scale;
 
         for (int x = 0; x < width; x++) {
             // x0 = (x/width)*3.5 - 2.5  (scaled)
-            int64_t x0 = ((int64_t)x * 3500000 / width) - 2500000;
+            int64_t x0 = ((int64_t)x * 3.5 * scale / width) - 2.5 * scale;
 
             int64_t xi = 0, yi = 0;
             int iteration = 0;
 
             while (iteration < max_iterations) {
                 // xi*xi + yi*yi <= 4
-                int64_t xi2 = (xi * xi) / SCALE;
-                int64_t yi2 = (yi * yi) / SCALE;
-                if (xi2 + yi2 > 4000000) break;
+                int64_t xi2 = (xi * xi) / scale;
+                int64_t yi2 = (yi * yi) / scale;
+                if (xi2 + yi2 > 4 * scale) break;
 
                 int64_t tmp = xi2 - yi2 + x0;
-                yi = (2 * xi * yi) / SCALE + y0;
+                yi = (2 * xi * yi) / scale + y0;
                 xi = tmp;
                 iteration++;
             }

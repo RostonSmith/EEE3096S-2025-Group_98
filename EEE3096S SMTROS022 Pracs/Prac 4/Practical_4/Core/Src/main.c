@@ -34,9 +34,9 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 // TODO: Add values for below variables
-#define NS = 1024      // Number of samples in LUT
-#define TIM2CLK = 16000000   // STM Clock frequency: Hint You might want to check the ioc file
-#define F_SIGNAL = 1000  	// Frequency of output analog signal
+#define NS            1024      // Number of samples in LUT
+#define TIM2CLK   16000000   // STM Clock frequency: Hint You might want to check the ioc file
+#define F_SIGNAL      1000  	// Frequency of output analog signal
 
 /* USER CODE END PD */
 
@@ -49,6 +49,9 @@
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 DMA_HandleTypeDef hdma_tim2_ch1;
+uint32_t current_tick;
+uint32_t last_button_press;
+uint8_t current_waveform;
 
 /* USER CODE BEGIN PV */
 // TODO: Add code for global variables, including LUTs
@@ -495,7 +498,7 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-  lcd_init();
+  init_LCD();
   HAL_Delay(50); // Give LCD time to initialize
   /* USER CODE END Init */
 
@@ -790,7 +793,7 @@ static void MX_GPIO_Init(void)
 void EXTI0_IRQHandler(void){
 
 	// TODO: Debounce using HAL_GetTick()
-  uint32_t current_tick = HAL_GetTick();
+  current_tick = HAL_GetTick();
 
   if (current_tick - last_button_press < 200){
     HAL_GPIO_EXTI_IRQHandler(Button0_Pin); //clear interrupt flags
@@ -860,7 +863,7 @@ void EXTI0_IRQHandler(void){
   lcd_command(CLEAR);
   lcd_putstring(waveform_name);
 
-  HAL_DMA_Start_IT(&hdma_tim2_ch1, (unint32_t)selected_lut, DestAddress, NS);
+  HAL_DMA_Start_IT(&hdma_tim2_ch1, (uint32_t)selected_lut, DestAddress, NS);
 
   __HAL_TIM_ENABLE_DMA(&htim2,TIM_DMA_CC1);
 

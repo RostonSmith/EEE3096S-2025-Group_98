@@ -790,15 +790,81 @@ static void MX_GPIO_Init(void)
 void EXTI0_IRQHandler(void){
 
 	// TODO: Debounce using HAL_GetTick()
+  uint32_t current_tick = HAL_GetTick();
 
+  if (current_tick - last_button_press < 200){
+    HAL_GPIO_EXTI_IRQHandler(Button0_Pin); //clear interrupt flags
+    return;
+  }
+
+  last_button_press = current_tick;
 
 	// TODO: Disable DMA transfer and abort IT, then start DMA in IT mode with new LUT and re-enable transfer
 	// HINT: Consider using C's "switch" function to handle LUT changes
+  __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
+  HAL_DMA_Abort_IT(&hdma_tim2_ch1);
 
+  current_waveform = (current_waveform + 1) % 6;
 
+  uint32_t *selected_lut;
+  char *waveform_name;
+  uint32_t frequency;
 
+  switch(current_waveform){
+    case 0:
+      selected_lut = Sin_LUT;
+      waveform_name = "Sine";
+      frequency = F_SIGNAL;
+      break;
 
-	HAL_GPIO_EXTI_IRQHandler(Button0_Pin); // Clear interrupt flags
+    case 1:
+      selected_lut = Saw_LUT;
+      waveform_name = "Sawtooth";
+      frequency = F_SIGNAL;
+      break;
+
+    case 2:
+      selected_lut = Triangle_LUT;
+      waveform_name = "Triangle";
+      frequency = F_SIGNAL;
+      break;
+
+    case 3:
+      selected_lut = Piano_LUT;
+      waveform_name = "Piano";
+      frequency = 500;
+      break;
+
+    case 4:
+      selected_lut = Guitar_LUT;
+      waveform_name = "Guitar";
+      frequency = 500;
+      break;
+
+    case 5:
+      selected_lut = Drum_LUT;
+      waveform_name = "Drums";
+      frequency = 500;
+      break;
+
+    default:
+      selected_lut = Sin_LUT;
+      waveform_name = "Sine";
+      frequency = F_SIGNAL;
+  }
+
+  TIM2_Ticks = TIM2CLK / (NS * frequency);
+  htim2.Init.Period = TIM2_Ticks - 1;
+  HAL_TIM_Base_Init(&htim2);
+
+  lcd_command(CLEAR);
+  lcd_putstring(waveform_name);
+
+  HAL_DMA_Start_IT(&hdma_tim2_ch1, (unint32_t)selected_lut, DestAddress, NS);
+
+  __HAL_TIM_ENABLE_DMA(&htim2,TIM_DMA_CC1);
+
+  HAL_GPIO_EXTI_IRQHandler(Button0_Pin);
 }
 /* USER CODE END 4 */
 

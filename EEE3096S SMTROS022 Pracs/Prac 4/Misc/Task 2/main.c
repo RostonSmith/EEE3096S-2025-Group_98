@@ -34,9 +34,10 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 // TODO: Add values for below variables
-#define NS        // Number of samples in LUT
-#define TIM2CLK   // STM Clock frequency: Hint You might want to check the ioc file
-#define F_SIGNAL  	// Frequency of output analog signal
+#define NS            1024      // Number of samples in LUT
+#define NS_WAVE       8192      // Number of samples in LUT
+#define TIM2CLK   16000000   // STM Clock frequency: Hint You might want to check the ioc file
+#define F_SIGNAL 	     1  	// Frequency of output analog signal
 
 /* USER CODE END PD */
 
@@ -49,22 +50,38 @@
 TIM_HandleTypeDef htim2;
 TIM_HandleTypeDef htim3;
 DMA_HandleTypeDef hdma_tim2_ch1;
+uint32_t current_tick;
+uint32_t last_button_press;
+uint8_t current_waveform;
+uint32_t *selected_lut;
+char *waveform_name;
+float frequency;
+uint32_t ns_to_use;
 
 /* USER CODE BEGIN PV */
 // TODO: Add code for global variables, including LUTs
+// Sin Wave LUT: 1024 samples, 4096 bytes (4.00KB)
 uint32_t Sin_LUT[NS] = {};
+
+// Saw Wave LUT: 1024 samples, 4096 bytes (4.00KB)
 uint32_t Saw_LUT[NS] = {};
+
+// Triangle Wave LUT: 1024 samples, 4096 bytes (4.00KB)
 uint32_t Triangle_LUT[NS] = {};
-uint32_t Piano_LUT = {};
-uint32_t Guitar_LUT = {};
-uint32_t Drum_LUT = {};
 
+// Piano: 8192 samples, 32,768 bytes (32.00KB)
+uint32_t Piano_LUT[NS_WAVE] = {};
 
+// Guitar: 8192 samples, 32,768 bytes (32.00KB)
+uint32_t Guitar_LUT[NS_WAVE] = {};
+
+// Drum: 8192 samples, 32,768 bytes (32.00KB)
+uint32_t Drum_LUT[NS_WAVE] = {};
 
 
 
 // TODO: Equation to calculate TIM2_Ticks
-uint32_t TIM2_Ticks = 0; // How often to write new LUT value
+uint32_t TIM2_Ticks = TIM2CLK / (NS * F_SIGNAL); // How often to write new LUT value
 uint32_t DestAddress = (uint32_t) &(TIM3->CCR3); // Write LUT TO TIM3->CCR3 to modify PWM duty cycle
 
 
@@ -102,34 +119,39 @@ int main(void)
   HAL_Init();
 
   /* USER CODE BEGIN Init */
-
   /* USER CODE END Init */
 
   /* Configure the system clock */
   SystemClock_Config();
 
   /* USER CODE BEGIN SysInit */
+  HAL_Delay(100);
+  init_LCD();
 
+  lcd_command(CLEAR);
+
+  lcd_putstring("Sine");
+  HAL_Delay(100);
   /* USER CODE END SysInit */
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);
   MX_DMA_Init();
   MX_TIM2_Init();
   MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   // TODO: Start TIM3 in PWM mode on channel 3
-
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
   // TODO: Start TIM2 in Output Compare (OC) mode on channel 1
-
+  HAL_TIM_OC_Start(&htim2, TIM_CHANNEL_1);
   // TODO: Start DMA in IT mode on TIM2->CH1. Source is LUT and Dest is TIM3->CCR3; start with Sine LUT
-
+  HAL_DMA_Start_IT(&hdma_tim2_ch1, (uint32_t)Sin_LUT, DestAddress, NS);
   // TODO: Write current waveform to LCD(Sine is the first waveform)
-  init_LCD();
   lcd_command(CLEAR);
-  lcd_putchar('M')
+  lcd_putstring("Sine"); 
   // TODO: Enable DMA (start transfer from LUT to CCR)
-
+  __HAL_TIM_ENABLE_DMA(&htim2, TIM_DMA_CC1);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -284,7 +306,7 @@ static void MX_TIM3_Init(void)
   htim3.Instance = TIM3;
   htim3.Init.Prescaler = 0;
   htim3.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim3.Init.Period = 4095; // 12-bit resolution
+  htim3.Init.Period = 4095;
   htim3.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim3.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim3) != HAL_OK)
@@ -397,15 +419,84 @@ static void MX_GPIO_Init(void)
 void EXTI0_IRQHandler(void){
 
 	// TODO: Debounce using HAL_GetTick()
+  current_tick = HAL_GetTick();
 
+  if (current_tick - last_button_press < 1000){
+    HAL_GPIO_EXTI_IRQHandler(Button0_Pin); //clear interrupt flags
+    return;
+  }
+
+  last_button_press = current_tick;
 
 	// TODO: Disable DMA transfer and abort IT, then start DMA in IT mode with new LUT and re-enable transfer
 	// HINT: Consider using C's "switch" function to handle LUT changes
+  __HAL_TIM_DISABLE_DMA(&htim2, TIM_DMA_CC1);
+  HAL_DMA_Abort_IT(&hdma_tim2_ch1);
 
+  current_waveform = (current_waveform + 1) % 6;
 
+  switch(current_waveform){
+    case 0:
+      selected_lut = Sin_LUT;
+      waveform_name = "Sine";
+      frequency = F_SIGNAL;
+      ns_to_use = NS;
+      break;
 
+    case 1:
+      selected_lut = Saw_LUT;
+      waveform_name = "Sawtooth";
+      frequency = F_SIGNAL;
+      ns_to_use = NS;
+      break;
 
-	HAL_GPIO_EXTI_IRQHandler(Button0_Pin); // Clear interrupt flags
+    case 2:
+      selected_lut = Triangle_LUT;
+      waveform_name = "Triangle";
+      frequency = F_SIGNAL;
+      ns_to_use = NS;
+      break;
+
+    case 3:
+      selected_lut = Piano_LUT;
+      waveform_name = "Piano";
+      frequency = F_SIGNAL;
+      ns_to_use = NS_WAVE;
+      break;
+
+    case 4:
+      selected_lut = Guitar_LUT;
+      waveform_name = "Guitar";
+      frequency = F_SIGNAL;
+      ns_to_use = NS_WAVE;
+      break;
+
+    case 5:
+      selected_lut = Drum_LUT;
+      waveform_name = "Drums";
+      frequency = F_SIGNAL;
+      ns_to_use = NS_WAVE;
+      break;
+
+    default:
+      selected_lut = Sin_LUT;
+      waveform_name = "Sine";
+      frequency = F_SIGNAL;
+      ns_to_use = NS;
+  }
+
+  TIM2_Ticks = TIM2CLK / (ns_to_use * frequency);
+  htim2.Init.Period = TIM2_Ticks - 1;
+  HAL_TIM_Base_Init(&htim2);
+
+  lcd_command(CLEAR);
+  lcd_putstring(waveform_name);
+
+  HAL_DMA_Start_IT(&hdma_tim2_ch1, (uint32_t)selected_lut, DestAddress, NS);
+
+  __HAL_TIM_ENABLE_DMA(&htim2,TIM_DMA_CC1);
+
+  HAL_GPIO_EXTI_IRQHandler(Button0_Pin);
 }
 /* USER CODE END 4 */
 

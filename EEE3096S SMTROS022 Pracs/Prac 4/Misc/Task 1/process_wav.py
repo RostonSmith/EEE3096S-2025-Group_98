@@ -35,141 +35,143 @@ def load_wav_mono(path):
     
     return data, sr
 
-def detect_key_regions(data, sr, min_silence_duration_ms=50):
+def find_best_1second_section(data, sr):
     """
-    Detect key regions of audio by finding non-silent sections
-    Returns list of (start_idx, end_idx) tuples
+    Find the most interesting 1-second section of audio
+    Uses multiple criteria to find the best representative section
     """
-    # Calculate envelope (smoothed absolute value)
-    window_size = int(sr * 0.01)  # 10ms window
-    envelope = np.convolve(np.abs(data), np.ones(window_size)/window_size, mode='same')
+    one_second_samples = sr  # 44100 samples for 44.1kHz
     
-    # Adaptive threshold based on signal statistics
-    threshold = np.mean(envelope) + 0.5 * np.std(envelope)
-    threshold = max(threshold, np.max(envelope) * 0.05)  # At least 5% of peak
+    if len(data) <= one_second_samples:
+        print("  Audio is 1 second or less, using entire file")
+        return 0, len(data)
     
-    # Find regions above threshold
-    above_threshold = envelope > threshold
+    print(f"  Analyzing {len(data)/sr:.1f} seconds of audio to find best 1-second section...")
     
-    # Find transitions
-    transitions = np.diff(above_threshold.astype(int))
-    starts = np.where(transitions == 1)[0]
-    ends = np.where(transitions == -1)[0]
+    # Search through the audio
+    metrics = []
+    step = sr // 10  # Search every 0.1 seconds
     
-    # Handle edge cases
-    if above_threshold[0]:
-        starts = np.concatenate([[0], starts])
-    if above_threshold[-1]:
-        ends = np.concatenate([ends, [len(data)-1]])
-    
-    # Merge close regions
-    min_silence_samples = int(sr * min_silence_duration_ms / 1000)
-    merged_regions = []
-    
-    if len(starts) > 0 and len(ends) > 0:
-        current_start = starts[0]
-        current_end = ends[0]
+    for i in range(0, len(data) - one_second_samples, step):
+        window = data[i:i+one_second_samples]
         
-        for i in range(1, len(starts)):
-            if starts[i] - current_end < min_silence_samples:
-                # Merge with current region
-                current_end = ends[i]
-            else:
-                # Save current region and start new one
-                merged_regions.append((current_start, current_end))
-                current_start = starts[i]
-                current_end = ends[i]
+        # Calculate multiple quality metrics
+        rms = np.sqrt(np.mean(window**2))
+        peak = np.max(np.abs(window))
+        variance = np.var(window)
+        dynamic_range = np.max(window) - np.min(window)
         
-        merged_regions.append((current_start, current_end))
+        # Zero crossings (indicates frequency content)
+        zero_crossings = np.sum(np.diff(np.sign(window)) != 0)
+        
+        # Spectral centroid (brightness of sound)
+        spectrum = np.abs(np.fft.rfft(window))
+        freqs = np.fft.rfftfreq(len(window), 1/sr)
+        spectral_centroid = np.sum(freqs * spectrum) / (np.sum(spectrum) + 1e-10)
+        
+        # Onset strength (transients, attacks)
+        frame_size = 2048
+        hop = 512
+        onset_strength = 0
+        for j in range(0, len(window) - frame_size, hop):
+            frame1 = window[j:j+frame_size]
+            frame2 = window[j+hop:j+hop+frame_size]
+            energy_diff = np.sum(frame2**2) - np.sum(frame1**2)
+            if energy_diff > 0:
+                onset_strength += energy_diff
+        
+        # Combined score (weighted)
+        score = (
+            rms * 0.15 +                              # Loudness
+            peak * 0.15 +                             # Peak amplitude
+            np.sqrt(variance) * 0.2 +                 # Variation
+            np.log1p(dynamic_range) * 0.15 +          # Dynamic range
+            np.log1p(zero_crossings) * 0.1 +          # Frequency content
+            np.log1p(spectral_centroid) * 0.1 +       # Brightness
+            np.log1p(onset_strength) * 0.15           # Transients/interest
+        )
+        
+        metrics.append((score, i, rms, peak, variance, zero_crossings, spectral_centroid))
     
-    return merged_regions, envelope, threshold
+    # Find best section
+    best_score, best_idx, best_rms, best_peak, best_var, best_zc, best_sc = max(metrics, key=lambda x: x[0])
+    
+    print(f"  Best 1-second section found at {best_idx/sr:.2f}s - {(best_idx+one_second_samples)/sr:.2f}s")
+    print(f"    RMS: {best_rms:.1f}, Peak: {best_peak:.1f}, Variance: {best_var:.1f}")
+    print(f"    Zero crossings: {best_zc}, Spectral centroid: {best_sc:.1f}Hz")
+    
+    return best_idx, one_second_samples
 
-def extract_key_samples(data, sr, N_target, strategy='mixed'):
+def analyze_optimal_resolution(data, sr):
     """
-    Extract N_target samples from entire audio intelligently
-    
-    Strategies:
-    - 'energy': Pure energy-adaptive across whole file
-    - 'events': Focus on detected events/transients
-    - 'mixed': Combination (recommended)
+    Analyze the 1-second section to determine optimal resolution
+    Tests different resolutions and calculates quality metrics
     """
-    print(f"  Strategy: {strategy}")
+    print("\n  Analyzing optimal resolution...")
     
-    if strategy == 'energy':
-        # Energy-adaptive across entire signal
-        return energy_adaptive_resample_whole(data, N_target)
+    # Test resolutions
+    test_resolutions = [256, 512, 1024, 2048, 4096, 8192]
     
-    elif strategy == 'events':
-        # Detect and sample from key events
-        return event_based_sampling(data, sr, N_target)
+    results = []
     
-    elif strategy == 'mixed':
-        # Hybrid approach
-        regions, envelope, threshold = detect_key_regions(data, sr)
+    for N in test_resolutions:
+        # Downsample using energy-adaptive method
+        resampled = energy_adaptive_resample(data, N)
         
-        if len(regions) == 0:
-            print("  No distinct regions detected, using energy-adaptive")
-            return energy_adaptive_resample_whole(data, N_target)
+        # Calculate quality metrics
         
-        # Calculate importance of each region
-        region_importance = []
-        total_energy = 0
+        # 1. Correlation with original (downsampled)
+        orig_downsampled = scipy_signal.resample(data, N)
+        correlation = np.corrcoef(resampled, orig_downsampled)[0, 1]
         
-        for start, end in regions:
-            region_data = data[start:end]
-            energy = np.sum(region_data**2)
-            peak = np.max(np.abs(region_data))
-            duration = end - start
-            
-            # Importance score
-            score = energy * 0.6 + peak * duration * 0.4
-            region_importance.append(score)
-            total_energy += score
+        # 2. Frequency content preservation
+        orig_fft = np.abs(np.fft.rfft(data))
+        resamp_fft = np.abs(np.fft.rfft(resampled))
+        # Compare first N/2 frequency bins
+        freq_bins_to_compare = min(len(orig_fft), len(resamp_fft)) // 2
+        orig_fft_norm = orig_fft[:freq_bins_to_compare] / (np.sum(orig_fft[:freq_bins_to_compare]) + 1e-10)
+        resamp_fft_norm = resamp_fft[:freq_bins_to_compare] / (np.sum(resamp_fft[:freq_bins_to_compare]) + 1e-10)
+        freq_similarity = 1 - np.sum(np.abs(orig_fft_norm - resamp_fft_norm))
         
-        region_importance = np.array(region_importance)
+        # 3. Dynamic range preservation
+        orig_dr = np.max(data) - np.min(data)
+        resamp_dr = np.max(resampled) - np.min(resampled)
+        dr_ratio = min(orig_dr, resamp_dr) / (max(orig_dr, resamp_dr) + 1e-10)
         
-        # Allocate samples proportionally to importance
-        samples_per_region = (region_importance / total_energy * N_target).astype(int)
+        # 4. Memory efficiency score (favor smaller sizes)
+        memory_kb = N * 4 / 1024
+        memory_score = 1.0 / (1.0 + memory_kb / 10)  # Normalized
         
-        # Ensure we use all samples
-        while np.sum(samples_per_region) < N_target:
-            idx = np.argmax(region_importance)
-            samples_per_region[idx] += 1
+        # Combined quality score
+        quality_score = (
+            correlation * 0.35 +
+            freq_similarity * 0.35 +
+            dr_ratio * 0.15 +
+            memory_score * 0.15
+        )
         
-        while np.sum(samples_per_region) > N_target:
-            idx = np.argmin(samples_per_region)
-            if samples_per_region[idx] > 1:
-                samples_per_region[idx] -= 1
-            else:
-                break
+        results.append({
+            'N': N,
+            'memory_kb': memory_kb,
+            'correlation': correlation,
+            'freq_similarity': freq_similarity,
+            'dr_ratio': dr_ratio,
+            'quality_score': quality_score
+        })
         
-        print(f"  Detected {len(regions)} key regions")
-        
-        # Sample from each region
-        result_samples = []
-        for i, (start, end) in enumerate(regions):
-            n_samples = samples_per_region[i]
-            if n_samples < 1:
-                continue
-            
-            region_data = data[start:end]
-            region_samples = energy_adaptive_resample_whole(region_data, n_samples)
-            result_samples.append(region_samples)
-            
-            duration_ms = (end - start) / sr * 1000
-            print(f"    Region {i+1}: {start}-{end} ({duration_ms:.0f}ms) -> {n_samples} samples")
-        
-        # Concatenate all samples
-        if len(result_samples) > 0:
-            return np.concatenate(result_samples)
-        else:
-            return energy_adaptive_resample_whole(data, N_target)
+        print(f"    {N:5d} samples: Quality={quality_score:.3f}, Correlation={correlation:.3f}, "
+              f"Freq={freq_similarity:.3f}, Memory={memory_kb:.1f}KB")
     
-    else:
-        raise ValueError(f"Unknown strategy: {strategy}")
+    # Find optimal resolution
+    # Prioritize quality but consider memory
+    best = max(results, key=lambda x: x['quality_score'])
+    
+    print(f"\n  RECOMMENDED: {best['N']} samples (Quality={best['quality_score']:.3f}, {best['memory_kb']:.1f}KB)")
+    
+    return results, best['N']
 
-def energy_adaptive_resample_whole(x, N, eps=1e-12):
-    """Energy-adaptive resampling for entire signal"""
+def energy_adaptive_resample(x, N, eps=1e-12):
+    """Energy-adaptive resampling - more samples where energy is high"""
     x = x - np.mean(x)
     energy = x**2 + eps
     
@@ -189,58 +191,6 @@ def energy_adaptive_resample_whole(x, N, eps=1e-12):
     
     return res
 
-def event_based_sampling(data, sr, N_target):
-    """
-    Sample based on detected events (onsets, transients)
-    Good for percussive or rhythmic content
-    """
-    # Detect onset strength
-    hop_length = max(1, len(data) // 10000)
-    
-    # Simple onset detection using energy difference
-    frame_length = int(sr * 0.02)  # 20ms frames
-    frames = []
-    
-    for i in range(0, len(data) - frame_length, hop_length):
-        frame = data[i:i+frame_length]
-        energy = np.sum(frame**2)
-        frames.append(energy)
-    
-    frames = np.array(frames)
-    
-    # Onset strength = difference in energy
-    onset_strength = np.diff(frames)
-    onset_strength = np.concatenate([[0], onset_strength])
-    onset_strength[onset_strength < 0] = 0  # Only increases
-    
-    # Smooth
-    if len(onset_strength) > 10:
-        onset_strength = np.convolve(onset_strength, np.ones(5)/5, mode='same')
-    
-    # Create importance map back to sample space
-    importance = np.zeros(len(data))
-    for i, strength in enumerate(onset_strength):
-        start_idx = i * hop_length
-        end_idx = min(start_idx + hop_length, len(data))
-        importance[start_idx:end_idx] = strength
-    
-    # Add baseline energy importance
-    baseline = data**2
-    importance = importance * 0.7 + baseline * 0.3
-    
-    # Sample based on importance
-    importance[importance < 0] = 0
-    importance += 1e-12
-    
-    cdf = np.cumsum(importance)
-    cdf = (cdf - cdf[0]) / (cdf[-1] - cdf[0])
-    
-    targets = np.linspace(0.0, 1.0, N_target)
-    idx = np.interp(targets, cdf, np.arange(len(cdf)))
-    result = np.interp(idx, np.arange(len(data)), data)
-    
-    return result
-
 def to_12bit_lut(arr):
     """Convert to 12-bit DAC values (0-4095)"""
     if np.max(np.abs(arr)) == 0:
@@ -253,13 +203,13 @@ def to_12bit_lut(arr):
     
     return scaled
 
-def export_c_array(name, arr, array_size_define="NS_AUDIO"):
+def export_c_array(name, arr, define_name="NS"):
     """Export as C array"""
     base_name = os.path.splitext(os.path.basename(name))[0]
     clean_name = ''.join(c if c.isalnum() else '_' for c in base_name).capitalize()
     
     out = f"// {clean_name}: {len(arr)} samples, {len(arr)*4:,} bytes ({len(arr)*4/1024:.2f}KB)\n"
-    out += f"uint32_t {clean_name}_LUT[{array_size_define}] = {{\n"
+    out += f"uint32_t {clean_name}_LUT[{define_name}] = {{\n"
     
     for i in range(0, len(arr), 16):
         chunk = ', '.join(f"{int(x):4d}" for x in arr[i:i+16])
@@ -271,149 +221,221 @@ def export_c_array(name, arr, array_size_define="NS_AUDIO"):
     out += "};\n"
     return out
 
-def process_full_audio(path, N_samples, strategy='mixed', show_plots=True):
+def process_wav_with_analysis(path, target_resolution=None, show_plots=True):
     """
-    Process ENTIRE audio file into N_samples
+    Complete processing pipeline:
+    1. Load audio
+    2. Find best 1-second section
+    3. Analyze optimal resolution (if not specified)
+    4. Resample and generate LUT
     """
     data, sr = load_wav_mono(path)
     
     print(f"\n{'='*70}")
     print(f"Processing: {os.path.basename(path)}")
-    print(f"  Full length: {len(data):,} samples ({len(data)/sr:.2f}s at {sr}Hz)")
-    print(f"  Compression ratio: {len(data)/N_samples:.1f}x")
-    print(f"  Original size: {len(data)*4/1024/1024:.2f}MB")
-    print(f"  Target size: {N_samples*4/1024:.2f}KB")
+    print(f"  Total duration: {len(data)/sr:.2f}s ({len(data):,} samples at {sr}Hz)")
     
-    # Extract key samples from ENTIRE file
-    resampled = extract_key_samples(data, sr, N_samples, strategy=strategy)
+    # Find best 1-second section
+    best_idx, section_length = find_best_1second_section(data, sr)
+    one_second_section = data[best_idx:best_idx+section_length]
     
-    print(f"  Extracted {len(resampled)} samples")
-    print(f"  Range: [{np.min(resampled):.1f}, {np.max(resampled):.1f}]")
+    print(f"  Extracted 1-second section: {len(one_second_section):,} samples")
+    
+    # Analyze optimal resolution if not specified
+    if target_resolution is None:
+        analysis_results, recommended_N = analyze_optimal_resolution(one_second_section, sr)
+        target_resolution = recommended_N
+    else:
+        print(f"\n  Using specified resolution: {target_resolution} samples")
+        analysis_results = None
+    
+    # Resample to target resolution
+    print(f"\n  Resampling to {target_resolution} samples...")
+    resampled = energy_adaptive_resample(one_second_section, target_resolution)
+    
+    print(f"  Compression ratio: {len(one_second_section)/target_resolution:.1f}x")
+    print(f"  Resampled range: [{np.min(resampled):.1f}, {np.max(resampled):.1f}]")
     
     # Convert to LUT
     lut = to_12bit_lut(resampled)
     
     print(f"  LUT range: [{np.min(lut)}, {np.max(lut)}]")
     print(f"  Mean: {np.mean(lut):.1f}, Std: {np.std(lut):.1f}")
+    print(f"  Memory: {len(lut)*4:,} bytes ({len(lut)*4/1024:.2f}KB)")
     
     if show_plots:
-        # Visualization
-        fig = plt.figure(figsize=(16, 12))
-        gs = fig.add_gridspec(5, 2, hspace=0.4, wspace=0.3)
+        # Create comprehensive visualization
+        if analysis_results is not None:
+            fig = plt.figure(figsize=(18, 14))
+            gs = fig.add_gridspec(6, 2, hspace=0.4, wspace=0.3)
+        else:
+            fig = plt.figure(figsize=(18, 12))
+            gs = fig.add_gridspec(5, 2, hspace=0.4, wspace=0.3)
         
-        # Plot 1: Full original audio
+        # Plot 1: Full audio with selected 1-second section
         ax1 = fig.add_subplot(gs[0, :])
         downsample = max(1, len(data) // 5000)
         plot_data = data[::downsample]
         plot_time = np.arange(len(plot_data)) * downsample / sr
         ax1.plot(plot_time, plot_data, 'gray', linewidth=0.5, alpha=0.7)
-        ax1.set_title(f'Original Audio: {os.path.basename(path)} ({len(data)/sr:.2f}s)', 
+        ax1.axvspan(best_idx/sr, (best_idx+section_length)/sr, 
+                   color='red', alpha=0.3, label='Selected 1-second section')
+        ax1.set_title(f'Full Audio: {os.path.basename(path)} ({len(data)/sr:.2f}s)', 
                      fontsize=12, fontweight='bold')
         ax1.set_xlabel('Time (s)')
         ax1.set_ylabel('Amplitude')
+        ax1.legend()
         ax1.grid(True, alpha=0.3)
         
-        # Plot 2: Envelope with detected regions
-        ax2 = fig.add_subplot(gs[1, :])
-        regions, envelope, threshold = detect_key_regions(data, sr)
-        env_downsample = max(1, len(envelope) // 5000)
-        ax2.plot(np.arange(len(envelope))[::env_downsample] / sr, 
-                envelope[::env_downsample], 'b-', linewidth=1, alpha=0.7, label='Envelope')
-        ax2.axhline(threshold, color='r', linestyle='--', label=f'Threshold', alpha=0.7)
-        
-        # Highlight regions
-        for i, (start, end) in enumerate(regions[:20]):  # Show first 20
-            ax2.axvspan(start/sr, end/sr, color='green', alpha=0.2)
-        
-        ax2.set_title(f'Signal Envelope & Key Regions (detected {len(regions)} regions)', 
-                     fontsize=11, fontweight='bold')
+        # Plot 2: Selected 1-second section waveform
+        ax2 = fig.add_subplot(gs[1, 0])
+        section_time = np.arange(len(one_second_section)) / sr
+        downsample2 = max(1, len(one_second_section) // 2000)
+        ax2.plot(section_time[::downsample2], one_second_section[::downsample2], 
+                'g-', linewidth=0.8)
+        ax2.set_title('Selected 1-Second Section (Time Domain)', fontsize=11, fontweight='bold')
         ax2.set_xlabel('Time (s)')
-        ax2.set_ylabel('Envelope')
-        ax2.legend()
+        ax2.set_ylabel('Amplitude')
         ax2.grid(True, alpha=0.3)
+        ax2.axhline(0, color='r', linestyle='--', alpha=0.5)
         
-        # Plot 3: Energy distribution of original
-        ax3 = fig.add_subplot(gs[2, 0])
-        energy = data**2
-        energy_downsample = max(1, len(energy) // 2000)
-        ax3.plot(np.arange(len(energy))[::energy_downsample] / sr,
-                energy[::energy_downsample], 'purple', linewidth=1)
-        ax3.set_title('Energy Distribution (Original)', fontsize=11, fontweight='bold')
+        # Plot 3: Spectrogram of 1-second section
+        ax3 = fig.add_subplot(gs[1, 1])
+        f, t, Sxx = scipy_signal.spectrogram(one_second_section, sr, nperseg=1024)
+        pcm = ax3.pcolormesh(t, f, 10 * np.log10(Sxx + 1e-10), shading='gouraud', cmap='viridis')
+        ax3.set_title('Spectrogram (1-Second Section)', fontsize=11, fontweight='bold')
+        ax3.set_ylabel('Frequency (Hz)')
         ax3.set_xlabel('Time (s)')
-        ax3.set_ylabel('Energy')
-        ax3.grid(True, alpha=0.3)
-        ax3.fill_between(np.arange(len(energy))[::energy_downsample] / sr,
-                        energy[::energy_downsample], alpha=0.3)
+        ax3.set_ylim([0, min(sr/2, 8000)])
+        plt.colorbar(pcm, ax=ax3, label='Power (dB)')
         
-        # Plot 4: Resampled waveform
-        ax4 = fig.add_subplot(gs[2, 1])
-        ax4.plot(resampled, 'g-', linewidth=1, alpha=0.8)
-        ax4.set_title(f'Condensed Signal ({N_samples} samples, {len(data)/N_samples:.0f}x compression)', 
-                     fontsize=11, fontweight='bold')
-        ax4.set_xlabel('Sample Index')
-        ax4.set_ylabel('Amplitude')
+        # Plot 4: Energy distribution
+        ax4 = fig.add_subplot(gs[2, 0])
+        energy = one_second_section**2
+        window = max(1, int(len(energy) / 500))
+        kernel = np.ones(window) / window
+        energy_smooth = np.convolve(energy, kernel, mode='same')
+        energy_time = np.arange(len(energy_smooth)) / sr
+        downsample3 = max(1, len(energy_smooth) // 2000)
+        ax4.plot(energy_time[::downsample3], energy_smooth[::downsample3], 
+                'purple', linewidth=1.5)
+        ax4.set_title('Energy Distribution (guides resampling)', fontsize=11, fontweight='bold')
+        ax4.set_xlabel('Time (s)')
+        ax4.set_ylabel('Energy')
         ax4.grid(True, alpha=0.3)
-        ax4.axhline(0, color='r', linestyle='--', alpha=0.5)
+        ax4.fill_between(energy_time[::downsample3], energy_smooth[::downsample3], alpha=0.3)
         
-        # Plot 5: Spectrograms comparison
-        ax5 = fig.add_subplot(gs[3, 0])
-        # Original (first few seconds for comparison)
-        sample_len = min(len(data), sr * 2)  # 2 seconds max
-        f, t, Sxx = scipy_signal.spectrogram(data[:sample_len], sr, nperseg=256)
-        ax5.pcolormesh(t, f, 10 * np.log10(Sxx + 1e-10), shading='gouraud', cmap='viridis')
-        ax5.set_title('Spectrogram (Original - first 2s)', fontsize=11, fontweight='bold')
-        ax5.set_ylabel('Frequency (Hz)')
-        ax5.set_xlabel('Time (s)')
-        ax5.set_ylim([0, min(sr/2, 8000)])
+        # Plot 5: Resampled waveform
+        ax5 = fig.add_subplot(gs[2, 1])
+        ax5.plot(resampled, 'b-', linewidth=1, alpha=0.8)
+        ax5.set_title(f'Resampled Signal ({target_resolution} samples)', 
+                     fontsize=11, fontweight='bold')
+        ax5.set_xlabel('Sample Index')
+        ax5.set_ylabel('Amplitude')
+        ax5.grid(True, alpha=0.3)
+        ax5.axhline(0, color='r', linestyle='--', alpha=0.5)
         
-        ax6 = fig.add_subplot(gs[3, 1])
-        # Resampled - approximate equivalent sample rate
-        equiv_sr = sr * N_samples / len(data)
-        if equiv_sr > 100:  # Only if meaningful
-            f2, t2, Sxx2 = scipy_signal.spectrogram(resampled, equiv_sr, nperseg=min(64, N_samples//4))
-            ax6.pcolormesh(t2, f2, 10 * np.log10(Sxx2 + 1e-10), shading='gouraud', cmap='viridis')
-            ax6.set_ylim([0, min(equiv_sr/2, 8000)])
-        else:
-            ax6.text(0.5, 0.5, 'Sample rate too low\nfor spectrogram', 
-                    ha='center', va='center', transform=ax6.transAxes)
-        ax6.set_title('Spectrogram (Condensed)', fontsize=11, fontweight='bold')
-        ax6.set_ylabel('Frequency (Hz)')
-        ax6.set_xlabel('Time (normalized)')
+        # Plot 6: Frequency comparison
+        ax6 = fig.add_subplot(gs[3, 0])
+        orig_fft = np.abs(np.fft.rfft(one_second_section))
+        orig_freqs = np.fft.rfftfreq(len(one_second_section), 1/sr)
+        resamp_fft = np.abs(np.fft.rfft(resampled))
+        resamp_freqs = np.fft.rfftfreq(len(resampled), 1/(sr * len(resampled) / len(one_second_section)))
         
-        # Plot 6: Final LUT
-        ax7 = fig.add_subplot(gs[4, :])
+        # Plot up to 8kHz
+        orig_mask = orig_freqs <= 8000
+        resamp_mask = resamp_freqs <= 8000
+        
+        ax6.semilogy(orig_freqs[orig_mask], orig_fft[orig_mask], 
+                    'g-', alpha=0.7, linewidth=1, label='Original 1s section')
+        ax6.semilogy(resamp_freqs[resamp_mask], resamp_fft[resamp_mask] * (len(one_second_section)/len(resampled)), 
+                    'b-', alpha=0.7, linewidth=1.5, label=f'Resampled ({target_resolution})')
+        ax6.set_title('Frequency Spectrum Comparison', fontsize=11, fontweight='bold')
+        ax6.set_xlabel('Frequency (Hz)')
+        ax6.set_ylabel('Magnitude')
+        ax6.legend()
+        ax6.grid(True, alpha=0.3)
+        
+        # Plot 7: Final LUT
+        row_idx = 4 if analysis_results is None else 5
+        ax7 = fig.add_subplot(gs[3, 1])
         ax7.plot(lut, 'b-', linewidth=1.5)
         ax7.axhline(2048, color='r', linestyle='--', label='Midpoint (2048)', linewidth=1.5)
         ax7.fill_between(range(len(lut)), lut, 2048, alpha=0.2)
-        ax7.set_title(f'Final 12-bit LUT ({len(lut)} samples)', fontsize=11, fontweight='bold')
+        ax7.set_title(f'Final 12-bit LUT', fontsize=11, fontweight='bold')
         ax7.set_xlabel('Sample Index')
         ax7.set_ylabel('Value (0-4095)')
         ax7.set_ylim([0, 4095])
         ax7.legend()
         ax7.grid(True, alpha=0.3)
         
-        plt.suptitle(f'{os.path.basename(path)} - {len(data)/N_samples:.0f}x compression - {N_samples*4/1024:.2f}KB', 
+        # Plot 8: Quality analysis (if available)
+        if analysis_results is not None:
+            ax8 = fig.add_subplot(gs[4, :])
+            resolutions = [r['N'] for r in analysis_results]
+            quality = [r['quality_score'] for r in analysis_results]
+            memory = [r['memory_kb'] for r in analysis_results]
+            
+            ax8_twin = ax8.twinx()
+            
+            line1 = ax8.plot(resolutions, quality, 'bo-', linewidth=2, markersize=8, label='Quality Score')
+            ax8.axvline(target_resolution, color='r', linestyle='--', linewidth=2, alpha=0.7, label='Selected')
+            ax8.set_xlabel('Resolution (samples)', fontsize=11)
+            ax8.set_ylabel('Quality Score', color='b', fontsize=11)
+            ax8.tick_params(axis='y', labelcolor='b')
+            ax8.set_xscale('log', base=2)
+            ax8.grid(True, alpha=0.3)
+            
+            line2 = ax8_twin.plot(resolutions, memory, 'gs-', linewidth=2, markersize=8, label='Memory (KB)')
+            ax8_twin.set_ylabel('Memory (KB)', color='g', fontsize=11)
+            ax8_twin.tick_params(axis='y', labelcolor='g')
+            
+            # Combined legend
+            lines = line1 + line2
+            labels = [l.get_label() for l in lines]
+            ax8.legend(lines, labels, loc='upper left')
+            
+            ax8.set_title('Quality vs Memory Trade-off Analysis', fontsize=11, fontweight='bold')
+        
+        # Plot 9: Sample distribution visualization
+        ax9 = fig.add_subplot(gs[row_idx, :])
+        
+        # Show where samples were taken from original
+        x = x = one_second_section - np.mean(one_second_section)
+        energy = x**2 + 1e-12
+        window = max(1, int(len(x) / 500))
+        kernel = np.ones(window) / window
+        energy_sm = np.convolve(energy, kernel, mode='same')
+        cdf = np.cumsum(energy_sm)
+        cdf = (cdf - cdf[0]) / (cdf[-1] - cdf[0])
+        targets = np.linspace(0.0, 1.0, target_resolution)
+        sample_indices = np.interp(targets, cdf, np.arange(len(cdf)))
+        
+        downsample4 = max(1, len(one_second_section) // 2000)
+        ax9.plot(np.arange(len(one_second_section))[::downsample4] / sr, 
+                one_second_section[::downsample4], 'gray', alpha=0.5, linewidth=0.5, label='Original')
+        ax9.scatter(sample_indices / sr, resampled, c='red', s=10, alpha=0.6, 
+                   label=f'Sampled points ({target_resolution})', zorder=5)
+        ax9.set_title('Sample Distribution (Energy-Adaptive)', fontsize=11, fontweight='bold')
+        ax9.set_xlabel('Time (s)')
+        ax9.set_ylabel('Amplitude')
+        ax9.legend()
+        ax9.grid(True, alpha=0.3)
+        
+        plt.suptitle(f'{os.path.basename(path)} - {target_resolution} samples, {target_resolution*4/1024:.2f}KB', 
                     fontsize=14, fontweight='bold')
         
-        save_name = f"{os.path.splitext(os.path.basename(path))[0]}_{N_samples}_fullsignal.png"
+        save_name = f"{os.path.splitext(os.path.basename(path))[0]}_{target_resolution}_1sec_analysis.png"
         plt.savefig(save_name, dpi=150, bbox_inches='tight')
         print(f"  Plot saved: {save_name}")
         plt.show()
     
-    return lut
+    return lut, target_resolution
 
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
 if __name__ == '__main__':
-    # Configuration
-    N_SAMPLES = 1024  # Try 256, 512, 1024, 2048, or 4096
-    
-    # Strategy options:
-    # 'energy' - Pure energy-adaptive (good for sustained sounds)
-    # 'events' - Event-based (good for percussive/rhythmic)
-    # 'mixed'  - Hybrid (RECOMMENDED - works well for everything)
-    STRATEGY = 'mixed'
     
     file_paths = [
         r"C:\Users\rosto\OneDrive - University of Cape Town\Fourth Year\Sem 2\EEE3096S\EEE3096S Git Repo SMTROS022\EEE3096S SMTROS022 Pracs\Prac 4\Misc\Task 1\piano.wav",
@@ -421,35 +443,54 @@ if __name__ == '__main__':
         r"C:\Users\rosto\OneDrive - University of Cape Town\Fourth Year\Sem 2\EEE3096S\EEE3096S Git Repo SMTROS022\EEE3096S SMTROS022 Pracs\Prac 4\Misc\Task 1\drum.wav"
     ]
     
+    # # Option 1: AUTO-DETECT optimal resolution for each file
+    # print("\n" + "="*70)
+    # print("MODE: AUTO-DETECT OPTIMAL RESOLUTION")
+    # print("  Analyzing 1-second sections to find best resolution for each file")
+    # print("="*70)
+    
+    # results_auto = {}
+    # for filepath in file_paths:
+    #     if os.path.exists(filepath):
+    #         lut, used_resolution = process_wav_with_analysis(filepath, target_resolution=None, show_plots=True)
+    #         results_auto[filepath] = (lut, used_resolution)
+    
+    # # Export with individual resolutions
+    # print("\n" + "="*70)
+    # print("C ARRAY OUTPUT (AUTO-DETECTED RESOLUTIONS):")
+    # print("="*70)
+    
+    # for filepath, (lut, N) in results_auto.items():
+    #     base_name = os.path.splitext(os.path.basename(filepath))[0].capitalize()
+    #     print(f"\n#define NS_{base_name.upper()}  {N}")
+    #     print(export_c_array(filepath, lut, f"NS_{base_name.upper()}"))
+    
+    # Option 2: FIXED resolution for all files (uncomment to use)
+    
+    FIXED_RESOLUTION = 8192  # Choose: 512, 1024, 2048, 4096, 8192, 
+    
     print("\n" + "="*70)
-    print(f"FULL SIGNAL COMPRESSION")
-    print(f"  Strategy: {STRATEGY}")
-    print(f"  Target: {N_SAMPLES} samples per file")
-    print(f"  Memory per file: {N_SAMPLES * 4 / 1024:.2f}KB")
-    print(f"  Total for 3 files: {3 * N_SAMPLES * 4 / 1024:.2f}KB")
+    print(f"MODE: FIXED RESOLUTION ({FIXED_RESOLUTION} samples)")
     print("="*70)
     
-    # Process all files
-    results = {}
+    results_fixed = {}
     for filepath in file_paths:
         if os.path.exists(filepath):
-            lut = process_full_audio(filepath, N_SAMPLES, strategy=STRATEGY, show_plots=True)
-            results[filepath] = lut
-        else:
-            print(f"\n⚠ WARNING: File not found: {filepath}")
+            lut, _ = process_wav_with_analysis(filepath, target_resolution=FIXED_RESOLUTION, show_plots=True)
+            results_fixed[filepath] = lut
     
-    # Export
+    # Export with fixed resolution
     print("\n" + "="*70)
-    print("C ARRAY OUTPUT:")
+    print(f"C ARRAY OUTPUT (FIXED {FIXED_RESOLUTION} SAMPLES):")
     print("="*70)
-    print()
+    print(f"\n#define NS_AUDIO  {FIXED_RESOLUTION}\n")
     
-    array_define = f"NS_AUDIO"
-    print(f"#define {array_define}  {N_SAMPLES}\n")
+    for filepath, lut in results_fixed.items():
+        print(export_c_array(filepath, lut, "NS_AUDIO"))
     
-    for filepath, lut in results.items():
-        print(export_c_array(filepath, lut, array_define))
     
-    print("="*70)
-    print("✓ COMPLETE - Entire signal condensed while preserving key audio features")
+    print("\n" + "="*70)
+    print("✓ ANALYSIS COMPLETE")
+    print("  Review the plots to see quality vs memory trade-offs")
+    print("  Choose the resolution that best fits your needs")
     print("="*70)
